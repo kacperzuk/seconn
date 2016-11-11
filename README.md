@@ -4,6 +4,7 @@ See:
 
 * [seconn-java](https://github.com/kacperzuk/seconn-java)
 * [seconn-avr](https://github.com/kacperzuk/seconn-avr)
+* [seconn-java-example](https://github.com/kacperzuk/seconn-java-example)
 
 Proto v1
 ====
