@@ -8,27 +8,55 @@ seconn is part of SeConn project. It's a protocol and set of libraries for secur
 * [seconn-android-example](https://github.com/kacperzuk/seconn-android-example) - Example Android project that uses seconn-java
 * [seconn-arduino-example](https://github.com/kacperzuk/seconn-arduino-example) - Example Arduino sketch that uses seconn-avr
 
-Proto v1
+Design goals
+============
+
+1. usable with hardware-constained embedded devices
+2. network agnostic
+3. provides authentication and encryption
+
+Protocol
 ====
 
 General frame
 -----
 
-Message Length is Little-Endian.
+Every frame follows this structure:
 
 ```
-Protocol Version (2B, 0x0001 here)
+Protocol Version (2B, 0x0001)
 Message Type (1B)
 Message Length in Bytes (2B)
 Message (MessageLengthBytes)
 ```
 
-Maximum message length is 1056 bytes (0x04 0x20).
+Message Length is Little-Endian.  
+Maximum message length is 65535B (0xFFFF), but it can be limited by implementations (especially implementations for embedded devices).
 
 Establishing connection
 -----
 
-First both send HelloRequest (0x00) with payload containing the public key (secp256r1) of sender (64 bytes, first 32B of X coordinate, then 32B of Y coordinate, little endian).
+```
+Connection initiator                   Connection receiver
+        +                                       +
+        |   HelloRequest                        |
+        | +-----------------------------------> |
+        |                                       |
+        |                                       |
+        |                        HelloRequest   |
+        | <-----------------------------------+ |
+        |                                       |
+        |                                       |
+        |   HelloResponse                       |
+        | +-----------------------------------> |
+        |                                       |
+        |                                       |
+        |                       HelloResponse   |
+        | <-----------------------------------+ |
+        +                                       +
+```
+
+First a HelloRequest (0x00) with payload containing the public key (secp256r1) of sender (64 bytes, first 32B of X coordinate, then 32B of Y coordinate, little endian) is sent.
 
 Example HelloRequest frame:
 
@@ -48,11 +76,14 @@ Example HelloRequest frame:
 0x12 0x34 0x56 0x78 0x9A 0xBC 0xDE 0xF0
 ```
 
-ECDH secret is established using public key from HelloRequest. It is then hashed with sha256. First 128b of hash are used as AES-128 encryption key (CBC), second 128b of hash are used as AES-128 CBC-MAC key.
+Other side replies with HelloRequest containing their public key.
 
-HelloRequest must be replied with HelloResponse (0x01). Before sending HelloResponse we must send our own HelloRequest. HelloResponse has payload containing:
-1. a CBC-MAC signature of ciphertext that follows (128b; Encrypt-then-MAC; no padding ne2eded, as ciphertext will always be multiple of 128b)
-2. encrypted public key of HelloResponse sender (ciphertext), See Message Encryption for details.
+ECDH secret is established using public key from HelloRequest. It is then hashed with sha256. First 16B of hash are used as AES-128 encryption key (CBC), second 16B of hash are used as AES-128 CBC-MAC key.
+
+HelloResponse (0x01) has payload containing:
+
+1. a CBC-MAC signature of ciphertext that follows (16B; Encrypt-then-MAC; no padding needed as ciphertext will always be multiple of 16B)
+2. encrypted public key of HelloResponse sender (that's the signed ciphertext), See Message Encryption for details.
 
 If HelloResponse is received and receiver is able to successfully verify MAC, decrypt message and obtained public key is equal to public key from HelloRequest, we consider the connection established and authenticated.
 
@@ -61,29 +92,26 @@ Sending data
 
 Message type is EncryptedData (0x02). Payload contains:
 
-1. a CBC-MAC signature of ciphertext that follows (128b; Encrypt-then-MAC)
-2. Encrypted message (ciphertext) (max 1040B). See Message Encryption for details.
+1. a CBC-MAC signature of ciphertext that follows (16B; Encrypt-then-MAC, no padding)
+2. Encrypted message (ciphertext). See Message Encryption for details.
 
 Message encryption
 ----
 
-plaintext can have max 1023Bt
-
-1. prepend plaintext with 128 bits of random data (that way initialization vector doesn't matter)
-2. pad plaintext according to PKCS7
-3. encrypt prepended, padded plaintext using CBC, AES-128
+1. prepend plaintext with one block (16B) of random data (that way initialization vector doesn't matter or is sent with data, depends how you look at this)
+2. pad plaintext according to PKCS7 (if `N` bytes must be inserted, insert `N` bytes of value `N`)
+3. encrypt prepended, padded plaintext using CBC, AES-128. IV doesn't matter, you can use anything.
 
 Receiving message
 ----
 
 When EncryptedData (0x02) frame is received, the receiver should:
 
-1. verify that payload has length that is a multiply of 128b (otherwise silently discard)
-1. verify that the CBC-MAC signature (first 16B) is valid for the whole remainder of payload (ciphertext) (otherwise silently discard this frame)
-2. decrypt ciphertext into plaintext
+1. verify that payload has length that is a multiply of 16B (otherwise silently discard)
+1. verify that the CBC-MAC signature (first 16B) is valid for the remainder of payload (ciphertext) (otherwise silently discard this frame)
+2. decrypt ciphertext using CBC decryption with AES
 3. drop first block of plaintext (16B)
 4. read value of last byte of plaintext (PN)
 5. verify that last PN bytes of plaintext have value PN (otherwise silently discard this frame)
 6. drop last PN bytes of plaintext
-7. ...
-8. profit!
+7. return plaintext to app
