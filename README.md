@@ -79,11 +79,11 @@ Example HelloRequest frame:
 
 Other side replies with HelloRequest containing their public key.
 
-ECDH secret is established using public key from HelloRequest. It is then hashed with sha256. First 16B of hash are used as AES-128 encryption key (CBC), second 16B of hash are used as AES-128 CBC-MAC key.
+ECDH secret is established using public key from HelloRequest. It is then hashed with sha256. First 16B of hash are used as AES-128 encryption key (CBC and encrypting last block in ECBC-MAC), second 16B of hash are used as AES-128 CBC-MAC key.
 
 HelloResponse (0x01) has payload containing:
 
-1. a CBC-MAC signature of ciphertext that follows (16B; Encrypt-then-MAC; no padding needed as ciphertext will always be multiple of 16B)
+1. a ECBC-MAC signature of ciphertext that follows (16B; Encrypt-then-MAC; no padding needed as ciphertext will always be multiple of 16B)
 2. encrypted public key of HelloResponse sender (that's the signed ciphertext), See Message Encryption for details.
 
 If HelloResponse is received and receiver is able to successfully verify MAC, decrypt message and obtained public key is equal to public key from HelloRequest, we consider the connection established and authenticated.
@@ -93,7 +93,7 @@ Sending data
 
 Message type is EncryptedData (0x02). Payload contains:
 
-1. a CBC-MAC signature of ciphertext that follows (16B; Encrypt-then-MAC, no padding)
+1. a ECBC-MAC signature of ciphertext that follows (16B; Encrypt-then-MAC, no padding)
 2. Encrypted message (ciphertext). See Message Encryption for details.
 
 Message encryption
@@ -109,7 +109,7 @@ Receiving message
 When EncryptedData (0x02) frame is received, the receiver should:
 
 1. verify that payload has length that is a multiply of 16B (otherwise silently discard)
-1. verify that the CBC-MAC signature (first 16B) is valid for the remainder of payload (ciphertext) (otherwise silently discard this frame)
+1. verify that the ECBC-MAC signature (first 16B) is valid for the remainder of payload (ciphertext) (otherwise silently discard this frame)
 2. decrypt ciphertext using CBC decryption with AES
 3. drop first block of plaintext (16B)
 4. read value of last byte of plaintext (PN)
